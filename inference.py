@@ -351,9 +351,9 @@ def run_task(
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    api_base = os.environ.get("API_BASE_URL", "https://api.openai.com/v1")
-    model = os.environ.get("MODEL_NAME", "gpt-4o-mini")
-    token = os.environ.get("HF_TOKEN") or os.environ.get("OPENAI_API_KEY")
+    api_base = os.environ.get("API_BASE_URL", "https://api.openai.com/v1").strip()
+    model = os.environ.get("MODEL_NAME", "gpt-4o-mini").strip()
+    token = (os.environ.get("HF_TOKEN") or os.environ.get("OPENAI_API_KEY") or "").strip()
 
     # --- v3: Typo-resilient token fix ---
     if token:
