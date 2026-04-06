@@ -1,0 +1,314 @@
+environment:
+  name: InboxZeroEnv
+  version: "3.0.0"
+  description: >
+    A production-grade, OpenEnv-compatible reinforcement learning environment
+    that simulates realistic human email triage workflows (Gmail/Outlook-style).
+    The agent processes a sequence of emails and must triage each one using one
+    of four actions: delete, archive, mark_important, or reply.
+    v3: 35-email dataset with 5 adversarial edge cases, 10 semantic keyword groups
+    for reply scoring (added empathy/resolution/timeline), semantic proximity bonus,
+    gymnasium-compatible render()/seed()/from_config() API, per-category accuracy
+    reporting, and chain-of-thought inference with few-shot gold examples.
+  author: "InboxZeroEnv Contributors"
+  license: MIT
+  tags:
+    - email-triage
+    - nlp
+    - rl-environment
+    - openenv
+    - llm-evaluation
+    - deterministic
+    - production-grade
+
+  determinism: true
+  reproducible: true
+  max_episode_steps: 30
+
+# ---------------------------------------------------------------------------
+# Evaluation metadata (OpenEnv v2 extension)
+# ---------------------------------------------------------------------------
+evaluation:
+  deterministic: true
+  reproducible: true
+  no_external_dependencies: true
+  scoring_type: "dense + efficiency-aware + semantic proximity"
+  final_score_formula: "avg_step_score * 0.80 + efficiency * 0.20"
+  efficiency_definition: "1 - (steps_taken / max_steps)"
+  reply_min_length: 40
+  reply_keyword_groups: 10
+  reply_semantic_proximity_bonus: 0.05
+  hard_task_strict_zeros:
+    - condition: "high-priority required reply missed AND deadline <= 2"
+      score: 0.0
+      rationale: "Critical SLA breach — no partial credit"
+    - condition: "delete action on any legitimate (non-spam) email"
+      score: 0.0
+      rationale: "Destructive irreversible action"
+  penalty_system:
+    - id: P1
+      name: "step_overhead"
+      trigger: "step_count > max_steps / 2"
+      rate_per_excess_step: 0.02
+    - id: P2
+      name: "repeated_mistake"
+      trigger: "3 or more consecutive score-0.0 steps"
+      amount: 0.10
+    - id: P3
+      name: "action_overuse"
+      trigger: "single action_type > 70% of all actions taken"
+      amount: 0.05
+
+# ---------------------------------------------------------------------------
+# Action space
+# ---------------------------------------------------------------------------
+action_space:
+  type: discrete
+  actions:
+    - name: delete
+      description: >
+        Permanently remove the email. Use ONLY for spam, phishing, and irrelevant
+        promotional junk. NEVER use on legitimate emails — score is 0.0.
+    - name: archive
+      description: >
+        Move to archive. Use for legitimate but low-priority emails
+        (newsletters, receipts, notifications) that need no follow-up.
+    - name: mark_important
+      description: >
+        Flag as important. Use for high-value emails that need attention
+        but do NOT require a reply (meeting invites, financial reports, announcements).
+    - name: reply
+      description: >
+        Send a response. Use when the email explicitly requires a human reply.
+        Must include a non-empty "response" field. Minimum 40 characters.
+        Scored on semantic keyword coverage (7 groups) and length.
+
+  action_schema:
+    type: object
+    required:
+      - action_type
+    properties:
+      action_type:
+        type: string
+        enum: ["delete", "archive", "mark_important", "reply"]
+        description: The chosen triage operation.
+      response:
+        type: string
+        nullable: true
+        description: >
+          Required when action_type is "reply".
+          Must be a professional response acknowledging the email.
+          Minimum 40 characters. Scored on 7 semantic keyword groups and length.
+
+# ---------------------------------------------------------------------------
+# Observation schema
+# ---------------------------------------------------------------------------
+observation_schema:
+  type: object
+  properties:
+    current_email:
+      type: object
+      description: The email to be triaged in this step.
+      properties:
+        id:
+          type: integer
+        subject:
+          type: string
+        sender:
+          type: string
+        body:
+          type: string
+        priority:
+          type: string
+          enum: ["low", "medium", "high"]
+        is_spam:
+          type: boolean
+        requires_response:
+          type: boolean
+        deadline:
+          type: integer
+          nullable: true
+          description: Steps until deadline becomes critical. Null means no deadline.
+    inbox_remaining:
+      type: integer
+      description: Number of emails not yet processed (including current).
+    step_count:
+      type: integer
+      description: Zero-indexed current step number.
+    task_name:
+      type: string
+    task_difficulty:
+      type: string
+      enum: ["easy", "medium", "hard"]
+    recent_action_history:
+      type: array
+      description: >
+        Structured summary of the last 1–5 triage decisions. Enables context-aware
+        reasoning. Each entry contains step, email_id, email_subject_snippet,
+        action_type, score, and was_correct.
+      items:
+        type: object
+        properties:
+          step:
+            type: integer
+          email_id:
+            type: integer
+          email_subject_snippet:
+            type: string
+          action_type:
+            type: string
+          score:
+            type: number
+          was_correct:
+            type: boolean
+
+# ---------------------------------------------------------------------------
+# Reward schema
+# ---------------------------------------------------------------------------
+reward_schema:
+  type: object
+  properties:
+    score:
+      type: number
+      minimum: 0.0
+      maximum: 1.0
+      description: Per-step score strictly in [0.0, 1.0].
+    reason:
+      type: string
+      description: >
+        Human-readable explanation of the score with ✓/✗/~ prefix and
+        penalty annotations [P1]/[P2]/[P3] when applicable.
+    action_was_valid:
+      type: boolean
+      description: False when the action was structurally malformed.
+
+# ---------------------------------------------------------------------------
+# Tasks
+# ---------------------------------------------------------------------------
+tasks:
+  - name: SpamSentinel
+    id: easy
+    difficulty: easy
+    description: >
+      Classify each email as spam (delete) or legitimate (any non-delete action).
+      Binary scoring: 1.0 for correct classification, 0.0 for incorrect.
+      No reply generation required.
+    email_categories:
+      - spam
+      - phishing
+      - promotion
+      - newsletter
+      - notification
+      - billing
+    max_steps: 15
+    scoring:
+      type: binary
+      correct: 1.0
+      incorrect: 0.0
+
+  - name: PriorityTriageDesk
+    id: medium
+    difficulty: medium
+    description: >
+      Handle a realistic inbox mix with priority-aware triage. Delete spam,
+      archive low-priority items, mark high-priority items as important, and
+      reply when required. Partial credit awarded for semantically close decisions.
+      Final score includes 20% efficiency bonus.
+    email_categories:
+      - spam
+      - phishing
+      - newsletter
+      - notification
+      - billing
+      - work
+      - meeting_request
+    max_steps: 20
+    scoring:
+      type: partial_credit
+      correct: 1.0
+      semantically_close: 0.2-0.7
+      incorrect: 0.0
+      reply_blend: "0.5 + quality_score * 0.5"
+
+  - name: FullInboxZero
+    id: hard
+    difficulty: hard
+    description: >
+      Complete end-to-end email triage with strict evaluation. Classify spam,
+      handle priorities, archive routine items, flag important items, and compose
+      high-quality replies. Critical failures score 0.0 (no partial credit).
+      Reply quality scored deterministically on length (min 40 chars) and keyword
+      coverage (7 semantic groups). Final score includes efficiency bonus.
+    email_categories:
+      - spam
+      - phishing
+      - newsletter
+      - notification
+      - billing
+      - work
+      - meeting_request
+      - urgent_work
+      - customer_complaint
+    max_steps: 30
+    scoring:
+      type: strict_dense_partial_credit
+      strict_zeros:
+        - "Spam not deleted"
+        - "Legitimate email deleted"
+        - "High-priority required reply missed with deadline <= 2"
+      correct: 1.0
+      semantically_close: 0.05-0.50
+      reply_quality:
+        min_length: 40
+        keyword_groups: 7
+        score_tiers:
+          - {matched: 0,   score: 0.25}
+          - {matched: "1-2", score: 0.55}
+          - {matched: "3-4", score: 0.80}
+          - {matched: "5+",  score: 1.0}
+
+# ---------------------------------------------------------------------------
+# Dataset
+# ---------------------------------------------------------------------------
+dataset:
+  path: data/emails.json
+  total_emails: 35
+  adversarial_emails: 5
+  adversarial_email_ids: [31, 32, 33, 34, 35]
+  categories:
+    - spam
+    - phishing
+    - promotion
+    - newsletter
+    - notification
+    - billing
+    - work
+    - meeting_request
+    - urgent_work
+    - customer_complaint
+  design_notes: >
+    Dataset v3 adds 5 adversarial edge-case emails designed to challenge LLM agents:
+    (31) Subtle corporate-domain phishing with realistic IT branding,
+    (32) Urgent API design decision disguised as a follow-up thread,
+    (33) Legitimate tech newsletter from a known brand,
+    (34) Overdue invoice escalating to collections requiring a dispute reply,
+    (35) Automated successful CI/CD notification that is legitimately archivable.
+
+# ---------------------------------------------------------------------------
+# Environment entry point
+# ---------------------------------------------------------------------------
+entry_point:
+  module: env.email_env
+  class: InboxZeroEnv
+  init_params:
+    task_name: "hard"
+
+# ---------------------------------------------------------------------------
+# Deployment
+# ---------------------------------------------------------------------------
+deployment:
+  docker: true
+  dockerfile: Dockerfile
+  huggingface_spaces: true
+  python_version: "3.11"
+  requirements: requirements.txt
