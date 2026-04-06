@@ -16,6 +16,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
+EXPOSE 7860
+
 # ── Working directory ────────────────────────────────────────
 WORKDIR /app
 
@@ -34,6 +36,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY --chown=user:user env/          ./env/
 COPY --chown=user:user data/         ./data/
 COPY --chown=user:user inference.py  ./inference.py
+COPY --chown=user:user app.py        ./app.py
 COPY --chown=user:user openenv.yaml  ./openenv.yaml
 
 # ── Ensure the package is importable ────────────────────────
@@ -49,4 +52,4 @@ ENV HF_TOKEN=""
 RUN python -c "from env import InboxZeroEnv; env = InboxZeroEnv('easy'); print('✓ InboxZeroEnv import OK')"
 
 # ── Default command ──────────────────────────────────────────
-CMD ["python", "inference.py"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
