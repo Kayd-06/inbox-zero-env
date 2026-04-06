@@ -34,7 +34,7 @@ dependencies = [
 ]
 
 [project.scripts]
-inbox-zero-env = "server.app:app"
+inbox-zero-env = "server.app:main"
 
 [project.urls]
 Homepage = "https://github.com/aneek22112007-tech/inbox-zero-env"
