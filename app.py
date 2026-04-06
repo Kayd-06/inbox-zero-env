@@ -42,13 +42,15 @@ async def health():
     return {"status": "healthy"}
 
 @app.post("/reset", response_model=Observation)
-async def reset(request: ResetRequest = Body(...)):
+async def reset(request: Optional[ResetRequest] = Body(default=None)):
     global _env
+    # Handle the case where 'request' is None (empty POST body)
+    task_id = request.task_id if (request and request.task_id) else "easy"
     try:
         # Re-initialize the environment for the requested task
-        _env = InboxZeroEnv(task_name=request.task_id)
+        _env = InboxZeroEnv(task_name=task_id)
         obs = _env.reset()
-        print(f"--- START TASK: {request.task_id.upper()} ---")
+        print(f"--- START TASK: {task_id.upper()} ---")
         return obs
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
