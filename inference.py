@@ -244,7 +244,7 @@ def run_task(
     deadline: float,
 ) -> Dict[str, Any]:
     """Run the agent through a single task and return a result dict."""
-    print(f"\n--- START TASK: {task_name.upper()} ---")
+    print(f"[START] task={task_name}", flush=True)
     print(f"{'=' * 60}")
     print(f"  Task: {task_name.upper()}")
     print(f"{'=' * 60}")
@@ -287,6 +287,7 @@ def run_task(
             tags = [f"[{k}:{v:+.2f}]" for k, v in info["penalty_breakdown"].items()]
             penalty_note = "  " + " ".join(tags)
 
+        print(f"[STEP] step={info['step_count']} reward={reward.score}", flush=True)
         print(f"    ✓ score: {reward.score:.4f} | {reward.reason[:75]}{penalty_note}")
 
         # Update per-category stats
@@ -315,7 +316,7 @@ def run_task(
     summary = env.summary()
     print(f"\n  Final score: {summary['final_score']:.4f} ({summary['steps_taken']} steps)")
     env.render()
-    print(f"--- END TASK: {task_name.upper()} ---")
+    print(f"[END] task={task_name} score={summary['final_score']} steps={summary['steps_taken']}", flush=True)
 
     # Build per-category accuracy table
     per_category = {
